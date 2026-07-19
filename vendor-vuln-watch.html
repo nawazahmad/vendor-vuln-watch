@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vendor Vuln Watch — OSINT Feed Monitor</title>
+<style>
+  :root {
+    --bg: #10161f;
+    --panel: #161d29;
+    --panel2: #1e2733;
+    --border: #303c4d;
+    --green: #4da8ff;
+    --green-dim: #2f7fd6;
+    --amber: #f2b84b;
+    --red: #ff6b6b;
+    --red-dim: #7a3030;
+    --text: #eaf1f8;
+    --text-dim: #93a3b5;
+    --mono: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    margin: 0;
+    padding: 24px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { position: relative; z-index: 1; max-width: 1400px; margin: 0 auto; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 20px; }
+  h1 { color: var(--green); font-size: 20px; margin: 0 0 4px 0; letter-spacing: 1px; }
+  h1 .blink { animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: 0.2; } }
+  .tagline { color: var(--text-dim); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel-title {
+    color: var(--green); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase;
+    margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  label { color: var(--text-dim); font-size: 12px; }
+  input[type="text"], input[type="password"], input[type="number"], select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    font-family: var(--mono); font-size: 13px; padding: 6px 8px; border-radius: 3px;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--green-dim); }
+  button {
+    background: transparent; border: 1px solid var(--green-dim); color: var(--green);
+    font-family: var(--mono); font-size: 12px; padding: 7px 14px; border-radius: 3px;
+    cursor: pointer; letter-spacing: 0.5px; text-transform: uppercase; transition: all .15s;
+  }
+  button:hover { background: rgba(77,168,255,0.1); border-color: var(--green); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.secondary { border-color: var(--border); color: var(--text-dim); }
+  button.secondary:hover { border-color: var(--text-dim); color: var(--text); }
+  button.danger { border-color: var(--red-dim); color: var(--red); }
+  .vendor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  .vendor-chip {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 3px; cursor: pointer;
+    font-size: 13px;
+  }
+  .vendor-chip:hover { border-color: var(--green-dim); }
+  .vendor-chip input { margin: 0; accent-color: var(--green); }
+  .vendor-chip.editing textarea {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11px; margin-top: 6px; padding: 4px; border-radius: 2px;
+  }
+  .edit-link { color: var(--text-dim); font-size: 10px; cursor: pointer; text-decoration: underline; margin-left: auto; }
+  #status-log {
+    font-size: 12px; color: var(--text-dim); max-height: 120px; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 8px; margin-top: 10px;
+  }
+  #status-log div { padding: 1px 0; }
+  .ok { color: var(--green-dim); } .warn { color: var(--amber); } .err { color: var(--red); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; color: var(--green); font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+    border-bottom: 1px solid var(--border); padding: 8px 6px; cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  th:hover { color: #fff; }
+  td { padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: rgba(77,168,255,0.05); }
+  .cve-link { color: var(--green); text-decoration: none; font-weight: bold; }
+  .cve-link:hover { text-decoration: underline; }
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; font-weight: bold; }
+  .sev-critical { background: rgba(255,77,77,0.15); color: var(--red); border: 1px solid var(--red-dim); }
+  .sev-high { background: rgba(255,176,32,0.15); color: var(--amber); border: 1px solid #7a5410; }
+  .sev-medium { background: rgba(77,168,255,0.12); color: var(--green-dim); border: 1px solid var(--border); }
+  .sev-low, .sev-unknown { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+  .kev-badge { background: var(--red); color: #000; font-weight: bold; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
+  .vendor-tag { display: inline-block; background: var(--panel2); border: 1px solid var(--border); color: var(--text-dim); padding: 1px 6px; border-radius: 8px; font-size: 10px; margin: 1px 2px 1px 0; }
+  .summary-cell { max-width: 420px; color: var(--text-dim); }
+  .links-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+  .link-card {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 3px; padding: 10px 12px;
+  }
+  .link-card a { color: var(--green); text-decoration: none; font-size: 13px; font-weight: bold; }
+  .link-card a:hover { text-decoration: underline; }
+  .link-card .note { color: var(--text-dim); font-size: 11px; margin-top: 4px; }
+  .empty-state { text-align: center; padding: 40px; color: var(--text-dim); font-size: 13px; }
+  .meta-bar { display: flex; justify-content: space-between; align-items: center; color: var(--text-dim); font-size: 12px; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+  .cache-note { font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+  code { background: var(--bg); border: 1px solid var(--border); border-radius: 2px; padding: 1px 5px; color: var(--amber); }
+  footer { color: var(--text-dim); font-size: 11px; margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--border); line-height: 1.7; }
+  .count-pill { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 2px 10px; color: var(--green); font-size: 12px; }
+  select#lookbackDays { min-width: 60px; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>&gt; VENDOR_VULN_WATCH<span class="blink">_</span></h1>
+    <div class="tagline">Detect. Hunt. Respond. — Enterprise vendor CVE &amp; 0-day monitor (NVD + CISA KEV)</div>
+  </header>
+
+  <div id="originWarning" class="panel" style="display:none; border-color: var(--red-dim);">
+    <div class="panel-title" style="color: var(--red);">⚠ Running from file:// — live pulls will likely fail</div>
+    <div style="color: var(--text-dim); font-size: 12px; line-height: 1.6;">
+      This page was opened directly from disk (<code id="originPath"></code>). Browsers send <code>Origin: null</code> on
+      requests made from <code>file://</code> pages, and NVD's API rejects that origin outright — every "Pull Latest" will
+      fail instantly regardless of retries or an API key. This is not a bug in the tool, it's how the browser labels the request.<br><br>
+      Fix: serve this file over HTTP instead. Quickest way — open a terminal in this file's folder and run
+      <code>python3 -m http.server 8000</code>, then visit <code>http://localhost:8000/vendor-vuln-watch.html</code>.
+      Once it's hosted on GitHub Pages (or any real domain), this warning disappears and pulls should work normally.
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Configuration</div>
+    <div class="row">
+      <label>NVD API Key (optional — raises rate limit 5→50 req/30s)</label>
+      <input type="password" id="nvdApiKey" placeholder="paste key or leave blank" style="width:260px;">
+      <label>Lookback</label>
+      <select id="lookbackDays">
+        <option value="7">7 days</option>
+        <option value="14">14 days</option>
+        <option value="15" selected>15 days</option>
+        <option value="30">30 days</option>
+        <option value="60">60 days</option>
+        <option value="90">90 days</option>
+      </select>
+      <label>Min Severity</label>
+      <select id="minSeverity">
+        <option value="ALL">All</option>
+        <option value="LOW">Low+</option>
+        <option value="MEDIUM">Medium+</option>
+        <option value="HIGH" selected>High+</option>
+        <option value="CRITICAL">Critical only</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:5px;">
+        <input type="checkbox" id="kevOnly" style="accent-color:var(--green);"> KEV / actively exploited only
+      </label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">
+      <span>Watchlist — click name to toggle, click "edit" to adjust NVD search terms</span>
+      <span class="count-pill" id="vendorCount">0 selected</span>
+    </div>
+    <div class="vendor-grid" id="vendorGrid"></div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="pullBtn">▶ Pull Latest</button>
+      <button class="secondary" id="loadCacheBtn">↺ Load Cached Results</button>
+      <button class="secondary" id="exportJsonBtn">⬇ Export JSON</button>
+      <button class="secondary" id="exportCsvBtn">⬇ Export CSV</button>
+      <button class="secondary" id="exportMdBtn">⬇ Export Markdown</button>
+      <button class="danger" id="clearBtn">Clear Results</button>
+      <span id="lastPull" style="color:var(--text-dim);font-size:11px;margin-left:auto;"></span>
+    </div>
+    <div id="status-log"></div>
+  </div>
+
+  <div class="panel">
+    <div class="meta-bar">
+      <span>Results <span class="count-pill" id="resultCount">0</span></span>
+      <span id="filterSummary"></span>
+    </div>
+    <div id="tableWrap">
+      <div class="empty-state">No results yet. Configure your watchlist above and hit "Pull Latest".</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Quick Links — vendor security bulletin portals (manual check; no public CORS feed)</div>
+    <div class="links-grid" id="linksGrid"></div>
+  </div>
+
+  <footer>
+    Data sources: NVD CVE API 2.0 (services.nvd.nist.gov) keyword-searched per vendor product term, cross-referenced against
+    CISA's official Known Exploited Vulnerabilities catalog (mirrored via github.com/cisagov/kev-data — CISA's own CORS-friendly
+    channel, since cisa.gov itself does not serve browser-CORS headers) for active-exploitation / 0-day flags. NVD keyword search
+    matches CVE description
+    text — tune the per-vendor search terms via "edit" if you're getting noise or missing hits. Unauthenticated NVD requests are
+    rate-limited to 5 req/30s (this tool auto-throttles); add an API key above for 50 req/30s. Several vendors (ServiceNow, Tanium,
+    Splunk advisory portal, Salesforce Trust) do not expose a public CORS-enabled feed and are covered only via the Quick Links
+    panel — verify with a scheduled human check, this tool cannot pull those automatically. No external dependencies, no backend;
+    all requests originate from your browser. Config and cached results persist in localStorage on this device only.
+  </footer>
+</div>
+
+<script>
+// ---------- Vendor config ----------
+const DEFAULT_VENDORS = [
+  { id: 'tableau', label: 'Tableau', keywords: ['Tableau'],
+    link: 'https://help.tableau.com/current/online/en-us/security_bulletins.htm', linkNote: 'Tableau/Salesforce security bulletins' },
+  { id: 'nginx', label: 'NGINX', keywords: ['nginx'],
+    link: 'https://nginx.org/en/security_advisories.html', linkNote: 'Official nginx.org advisories' },
+  { id: 'github', label: 'GitHub', keywords: ['GitHub Enterprise'],
+    link: 'https://github.blog/tag/security/', linkNote: 'GitHub security blog + advisory database' },
+  { id: 'filecloud', label: 'FileCloud', keywords: ['FileCloud'],
+    link: 'https://www.filecloud.com/supportdocs/fcdoc/latest/server/security-advisories', linkNote: 'FileCloud security advisories (docs.filecloud.com)' },
+  { id: 'servicenow', label: 'ServiceNow', keywords: ['ServiceNow'],
+    link: 'https://support.servicenow.com/kb?id=security_bulletins', linkNote: 'ServiceNow security bulletins (login required)' },
+  { id: 'aws', label: 'AWS', keywords: ['Amazon Web Services'],
+    link: 'https://aws.amazon.com/security/security-bulletins/', linkNote: 'AWS rarely issues CVEs directly — check bulletins page, NVD hits here are mostly AWS OSS tooling' },
+  { id: 'jira', label: 'Jira', keywords: ['Jira'],
+    link: 'https://confluence.atlassian.com/security/atlassian-security-advisories-33196786.html', linkNote: 'Atlassian security advisories' },
+  { id: 'confluence', label: 'Confluence', keywords: ['Confluence'],
+    link: 'https://confluence.atlassian.com/security/atlassian-security-advisories-33196786.html', linkNote: 'Atlassian security advisories' },
+  { id: 'splunk', label: 'Splunk', keywords: ['Splunk'],
+    link: 'https://advisory.splunk.com/', linkNote: 'Splunk security advisory portal' },
+  { id: 'defender', label: 'Defender', keywords: ['Microsoft Defender'],
+    link: 'https://msrc.microsoft.com/update-guide', linkNote: 'MSRC Security Update Guide' },
+  { id: 'tanium', label: 'Tanium', keywords: ['Tanium'],
+    link: 'https://www.tanium.com/trust/', linkNote: 'Tanium Trust / security bulletins' },
+];
+
+const NVD_BASE = 'https://services.nvd.nist.gov/rest/json/cves/2.0';
+const KEV_URL = 'https://raw.githubusercontent.com/cisagov/kev-data/develop/known_exploited_vulnerabilities.json';
+const LS_CONFIG = 'vvw_vendor_config_v2';
+const LS_RESULTS = 'vvw_last_results_v1';
+const LS_SELECTED = 'vvw_selected_v1';
+
+let vendors = loadVendorConfig();
+let selected = new Set(loadSelected());
+let currentResults = [];
+let kevMap = {};
+let sortState = { col: 'published', dir: 'desc' };
+
+function loadVendorConfig() {
+  try {
+    const raw = localStorage.getItem(LS_CONFIG);
+    if (!raw) return structuredClone(DEFAULT_VENDORS);
+    const saved = JSON.parse(raw);
+    // merge: keep saved edits, but add any new default vendors not present
+    const savedIds = new Set(saved.map(v => v.id));
+    DEFAULT_VENDORS.forEach(dv => { if (!savedIds.has(dv.id)) saved.push(dv); });
+    return saved;
+  } catch (e) { return structuredClone(DEFAULT_VENDORS); }
+}
+function saveVendorConfig() { localStorage.setItem(LS_CONFIG, JSON.stringify(vendors)); }
+function loadSelected() {
+  try {
+    const raw = localStorage.getItem(LS_SELECTED);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return DEFAULT_VENDORS.map(v => v.id); // default: all selected
+}
+function saveSelected() { localStorage.setItem(LS_SELECTED, JSON.stringify([...selected])); }
+
+function log(msg, cls) {
+  const el = document.getElementById('status-log');
+  const line = document.createElement('div');
+  line.className = cls || '';
+  const t = new Date().toLocaleTimeString();
+  line.textContent = `[${t}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderVendorGrid() {
+  const grid = document.getElementById('vendorGrid');
+  grid.innerHTML = '';
+  vendors.forEach(v => {
+    const chip = document.createElement('div');
+    chip.className = 'vendor-chip';
+    chip.innerHTML = `
+      <input type="checkbox" ${selected.has(v.id) ? 'checked' : ''} data-id="${v.id}">
+      <span>${v.label}</span>
+      <span class="edit-link" data-edit="${v.id}">edit</span>
+    `;
+    grid.appendChild(chip);
+    const cb = chip.querySelector('input');
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(v.id); else selected.delete(v.id);
+      saveSelected();
+      updateVendorCount();
+    });
+    chip.querySelector('.edit-link').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEdit(chip, v);
+    });
+  });
+  updateVendorCount();
+}
+
+function toggleEdit(chip, v) {
+  const existing = chip.querySelector('textarea');
+  if (existing) { existing.remove(); chip.classList.remove('editing'); return; }
+  chip.classList.add('editing');
+  const ta = document.createElement('textarea');
+  ta.rows = 2;
+  ta.value = v.keywords.join(', ');
+  ta.placeholder = 'comma-separated NVD search terms';
+  ta.addEventListener('blur', () => {
+    v.keywords = ta.value.split(',').map(s => s.trim()).filter(Boolean);
+    saveVendorConfig();
+    renderLinksGrid();
+  });
+  chip.appendChild(ta);
+  ta.focus();
+}
+
+function updateVendorCount() {
+  document.getElementById('vendorCount').textContent = `${selected.size} selected`;
+}
+
+function renderLinksGrid() {
+  const grid = document.getElementById('linksGrid');
+  grid.innerHTML = '';
+  vendors.forEach(v => {
+    const card = document.createElement('div');
+    card.className = 'link-card';
+    card.innerHTML = `<a href="${v.link}" target="_blank" rel="noopener">${v.label} ↗</a><div class="note">${v.linkNote}</div>`;
+    grid.appendChild(card);
+  });
+}
+
+// ---------- Fetching ----------
+function fmtDate(d) { return d.toISOString().split('.')[0] + '.000'; }
+
+async function fetchKEV() {
+  try {
+    const res = await fetch(KEV_URL);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    kevMap = {};
+    (data.vulnerabilities || []).forEach(v => { kevMap[v.cveID] = v; });
+    log(`CISA KEV loaded: ${Object.keys(kevMap).length} known-exploited CVEs in catalog.`, 'ok');
+  } catch (e) {
+    log(`CISA KEV fetch failed (${e.message}). KEV cross-referencing will be unavailable this run.`, 'err');
+  }
+}
+
+function getSeverity(cve) {
+  const metrics = cve.metrics || {};
+  const src = metrics.cvssMetricV31 || metrics.cvssMetricV30 || metrics.cvssMetricV2;
+  if (src && src[0]) {
+    const d = src[0].cvssData;
+    return { score: d.baseScore, severity: (d.baseSeverity || src[0].baseSeverity || 'UNKNOWN').toUpperCase() };
+  }
+  return { score: null, severity: 'UNKNOWN' };
+}
+
+const SEV_ORDER = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Retries a single NVD query with backoff. NVD's unauthenticated WAF sometimes
+// drops the connection outright (shows up as a generic "Failed to fetch" /
+// TypeError rather than a readable HTTP status) once a sustained run has been
+// going a while — that's a throttle, not a permanent failure, so retry before
+// giving up.
+async function fetchNvdWithRetry(url, headers, label, maxRetries) {
+  let attempt = 0;
+  while (true) {
+    try {
+      const res = await fetch(url, { headers });
+      if (res.status === 403 || res.status === 429) {
+        throw new Error(`HTTP ${res.status} (rate limited)`);
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      attempt++;
+      if (attempt > maxRetries) {
+        throw e;
+      }
+      const backoff = 10000 * attempt; // 10s, 20s, 30s...
+      log(`${label}: request failed (${e.message}) — likely NVD throttling. Retrying in ${backoff/1000}s (attempt ${attempt}/${maxRetries})...`, 'warn');
+      await sleep(backoff);
+    }
+  }
+}
+
+async function pullLatest() {
+  const btn = document.getElementById('pullBtn');
+  btn.disabled = true;
+  document.getElementById('status-log').innerHTML = '';
+  const days = parseInt(document.getElementById('lookbackDays').value, 10);
+  const end = new Date();
+  const start = new Date(end.getTime() - days * 86400000);
+  const apiKey = document.getElementById('nvdApiKey').value.trim();
+  const spacingMs = apiKey ? 900 : 7000; // 50/30s vs 5/30s, with safety margin
+  const maxRetries = 2;
+
+  log(`Starting pull: ${selected.size} vendors, ${days}-day lookback, ${apiKey ? 'authenticated' : 'unauthenticated (throttled — consider adding a free API key)'} NVD requests.`);
+  await fetchKEV();
+
+  const active = vendors.filter(v => selected.has(v.id));
+  const totalRequests = active.reduce((n, v) => n + v.keywords.length, 0);
+  log(`Queuing ${totalRequests} NVD request(s) across ${active.length} vendors. Unauthenticated runs are deliberately slow to stay under NVD's limit — this can take a few minutes.`);
+  const resultMap = new Map(); // cveID -> {..., vendors:Set}
+  let failCount = 0;
+
+  for (const v of active) {
+    for (const kw of v.keywords) {
+      const params = new URLSearchParams({
+        keywordSearch: kw,
+        pubStartDate: fmtDate(start),
+        pubEndDate: fmtDate(end),
+        resultsPerPage: '200',
+      });
+      const headers = apiKey ? { apiKey } : {};
+      const label = `${v.label} ("${kw}")`;
+      try {
+        const data = await fetchNvdWithRetry(`${NVD_BASE}?${params.toString()}`, headers, label, maxRetries);
+        const items = data.vulnerabilities || [];
+        items.forEach(({ cve }) => {
+          const id = cve.id;
+          const { score, severity } = getSeverity(cve);
+          const descObj = (cve.descriptions || []).find(d => d.lang === 'en');
+          if (!resultMap.has(id)) {
+            resultMap.set(id, {
+              id, score, severity,
+              published: cve.published,
+              lastModified: cve.lastModified,
+              summary: descObj ? descObj.value : '',
+              vendorTags: new Set(),
+              kev: !!kevMap[id],
+              kevInfo: kevMap[id] || null,
+            });
+          }
+          resultMap.get(id).vendorTags.add(v.label);
+        });
+        log(`${label}: ${items.length} CVE(s) matched.`, 'ok');
+      } catch (e) {
+        failCount++;
+        log(`${label}: gave up after ${maxRetries} retries (${e.message}). Try again shortly, or add an API key.`, 'err');
+      }
+      await sleep(spacingMs);
+    }
+  }
+
+  currentResults = [...resultMap.values()].map(r => ({ ...r, vendorTags: [...r.vendorTags] }));
+  const summaryClass = failCount === 0 ? 'ok' : 'warn';
+  log(`Pull complete: ${currentResults.length} unique CVE(s) across watchlist. ${failCount > 0 ? failCount + ' quer(y/ies) failed after retries — rerun to fill gaps.' : 'All queries succeeded.'}`, summaryClass);
+  localStorage.setItem(LS_RESULTS, JSON.stringify({ ts: Date.now(), results: currentResults }));
+  document.getElementById('lastPull').textContent = `Last pull: ${new Date().toLocaleString()}`;
+  btn.disabled = false;
+  renderTable();
+}
+
+function loadCachedResults() {
+  const raw = localStorage.getItem(LS_RESULTS);
+  if (!raw) { log('No cached results found on this device.', 'warn'); return; }
+  const { ts, results } = JSON.parse(raw);
+  currentResults = results;
+  document.getElementById('lastPull').textContent = `Loaded cache from: ${new Date(ts).toLocaleString()}`;
+  log(`Loaded ${results.length} cached CVE(s) from ${new Date(ts).toLocaleString()}.`, 'ok');
+  renderTable();
+}
+
+// ---------- Rendering ----------
+function applyFilters(rows) {
+  const minSev = document.getElementById('minSeverity').value;
+  const kevOnly = document.getElementById('kevOnly').checked;
+  let out = rows;
+  if (minSev !== 'ALL') {
+    const threshold = SEV_ORDER[minSev];
+    out = out.filter(r => SEV_ORDER[r.severity] >= threshold);
+  }
+  if (kevOnly) out = out.filter(r => r.kev);
+  return out;
+}
+
+function sortRows(rows) {
+  const { col, dir } = sortState;
+  const mult = dir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    let av, bv;
+    if (col === 'severity') { av = SEV_ORDER[a.severity]; bv = SEV_ORDER[b.severity]; }
+    else if (col === 'score') { av = a.score || 0; bv = b.score || 0; }
+    else if (col === 'published') { av = new Date(a.published).getTime(); bv = new Date(b.published).getTime(); }
+    else { av = a.id; bv = b.id; }
+    return av < bv ? -1 * mult : av > bv ? 1 * mult : 0;
+  });
+}
+
+function renderTable() {
+  const filtered = applyFilters(currentResults);
+  const rows = sortRows(filtered);
+  document.getElementById('resultCount').textContent = rows.length;
+  document.getElementById('filterSummary').textContent =
+    `${document.getElementById('minSeverity').value} severity · ${document.getElementById('kevOnly').checked ? 'KEV only' : 'all sources'}`;
+  const wrap = document.getElementById('tableWrap');
+  if (rows.length === 0) {
+    wrap.innerHTML = '<div class="empty-state">No results match current filters.</div>';
+    return;
+  }
+  const table = document.createElement('table');
+  table.innerHTML = `
+    <thead><tr>
+      <th data-sort="id">CVE ID</th>
+      <th>Vendor(s)</th>
+      <th data-sort="severity">Severity</th>
+      <th data-sort="score">CVSS</th>
+      <th data-sort="published">Published</th>
+      <th>KEV / Exploited</th>
+      <th>Tenable</th>
+      <th>Summary</th>
+    </tr></thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector('tbody');
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const sevClass = 'sev-' + r.severity.toLowerCase();
+    const kevBadge = r.kev
+      ? `<span class="kev-badge" title="${r.kevInfo && r.kevInfo.shortDescription ? r.kevInfo.shortDescription.replace(/"/g,'&quot;') : 'CISA KEV listed'}">KEV${r.kevInfo && r.kevInfo.knownRansomwareCampaignUse === 'Known' ? ' · RANSOMWARE' : ''}</span>`
+      : '';
+    tr.innerHTML = `
+      <td><a class="cve-link" href="https://nvd.nist.gov/vuln/detail/${r.id}" target="_blank" rel="noopener">${r.id}</a></td>
+      <td>${r.vendorTags.map(t => `<span class="vendor-tag">${t}</span>`).join('')}</td>
+      <td><span class="badge ${sevClass}">${r.severity}</span></td>
+      <td>${r.score !== null ? r.score.toFixed(1) : '—'}</td>
+      <td>${r.published ? r.published.split('T')[0] : '—'}</td>
+      <td>${kevBadge}</td>
+      <td><a class="cve-link" href="https://www.tenable.com/cve/${r.id}/plugins" target="_blank" rel="noopener" title="Opens Tenable's plugin list for this CVE">Check ↗</a></td>
+      <td class="summary-cell">${(r.summary || '').slice(0, 220)}${r.summary && r.summary.length > 220 ? '…' : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  wrap.innerHTML = '';
+  wrap.appendChild(table);
+  table.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+      else { sortState.col = col; sortState.dir = 'desc'; }
+      renderTable();
+    });
+  });
+}
+
+// ---------- Export ----------
+function download(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function exportJson() {
+  const rows = sortRows(applyFilters(currentResults));
+  download(`vendor-vuln-watch_${new Date().toISOString().split('T')[0]}.json`, JSON.stringify(rows, null, 2), 'application/json');
+}
+function csvEscape(val) {
+  const s = String(val ?? '');
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+function exportCsv() {
+  const rows = sortRows(applyFilters(currentResults));
+  const headers = ['CVE ID', 'Vendors', 'Severity', 'CVSS', 'Published', 'Last Modified', 'KEV', 'Ransomware Known', 'NVD Link', 'Tenable Plugins Link', 'Summary'];
+  const lines = [headers.map(csvEscape).join(',')];
+  rows.forEach(r => {
+    lines.push([
+      r.id,
+      r.vendorTags.join('; '),
+      r.severity,
+      r.score ?? '',
+      r.published ? r.published.split('T')[0] : '',
+      r.lastModified ? r.lastModified.split('T')[0] : '',
+      r.kev ? 'YES' : 'NO',
+      r.kevInfo && r.kevInfo.knownRansomwareCampaignUse === 'Known' ? 'YES' : 'NO',
+      `https://nvd.nist.gov/vuln/detail/${r.id}`,
+      `https://www.tenable.com/cve/${r.id}/plugins`,
+      r.summary || '',
+    ].map(csvEscape).join(','));
+  });
+  download(`vendor-vuln-watch_${new Date().toISOString().split('T')[0]}.csv`, lines.join('\r\n'), 'text/csv');
+}
+function exportMarkdown() {
+  const rows = sortRows(applyFilters(currentResults));
+  let md = `# Vendor Vulnerability Watch — ${new Date().toLocaleString()}\n\n`;
+  md += `| CVE | Vendor(s) | Severity | CVSS | Published | KEV | Tenable | Summary |\n|---|---|---|---|---|---|---|---|\n`;
+  rows.forEach(r => {
+    md += `| [${r.id}](https://nvd.nist.gov/vuln/detail/${r.id}) | ${r.vendorTags.join(', ')} | ${r.severity} | ${r.score ?? '—'} | ${r.published ? r.published.split('T')[0] : '—'} | ${r.kev ? 'YES' : ''} | [Check](https://www.tenable.com/cve/${r.id}/plugins) | ${(r.summary || '').replace(/\|/g, '/').slice(0, 200)} |\n`;
+  });
+  download(`vendor-vuln-watch_${new Date().toISOString().split('T')[0]}.md`, md, 'text/markdown');
+}
+
+// ---------- Wire up ----------
+document.getElementById('pullBtn').addEventListener('click', pullLatest);
+document.getElementById('loadCacheBtn').addEventListener('click', loadCachedResults);
+document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+document.getElementById('exportMdBtn').addEventListener('click', exportMarkdown);
+document.getElementById('clearBtn').addEventListener('click', () => { currentResults = []; renderTable(); log('Results cleared.'); });
+document.getElementById('minSeverity').addEventListener('change', renderTable);
+document.getElementById('kevOnly').addEventListener('change', renderTable);
+
+renderVendorGrid();
+renderLinksGrid();
+
+if (location.protocol === 'file:') {
+  document.getElementById('originWarning').style.display = 'block';
+  document.getElementById('originPath').textContent = location.href;
+}
+</script>
+</body>
+</html>
